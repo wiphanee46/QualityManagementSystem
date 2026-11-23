@@ -1,0 +1,187 @@
+<CodeBlock language="html" editable>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quality Management System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+
+  <header class="header">
+    <div>
+      <h1>Quality Management System</h1>
+      <p>ระบบจัดการปัญหาลูกค้าและวิเคราะห์คุณภาพ</p>
+    </div>
+
+
+<nav>
+<button class="nav-btn active" id="complaintTab">
+Complaint Tracking
+</button>
+<button class="nav-btn" id="dashboardTab">
+Quality Dashboard
+</button>
+</nav>
+
+  </header>
+
+
+  <main class="container">
+
+
+<!-- หน้า Complaint Tracking -->
+<section id="complaintPage">
+
+<h2>Customer Complaint Tracking</h2>
+<p class="subtitle">บันทึกและติดตามปัญหาที่ได้รับแจ้งจากลูกค้า</p>
+
+<div class="card">
+<h3>บันทึกปัญหาใหม่</h3>
+
+<form id="complaintForm">
+
+<div class="form-grid">
+
+<div>
+<label>วันที่แจ้งปัญหา *</label>
+<input type="date" id="date" required>
+</div>
+
+<div>
+<label>ชื่อลูกค้า *</label>
+<input type="text" id="customer"
+                placeholder="ชื่อลูกค้า" required>
+</div>
+
+<div>
+<label>เลขที่ PO</label>
+<input type="text" id="po"
+                placeholder="เช่น PO202611001">
+</div>
+
+<div>
+<label>ประเภทปัญหา *</label>
+<select id="type" required>
+<option value="">เลือกประเภทปัญหา</option>
+<option value="งานเปียก">งานเปียก</option>
+<option value="ขนาดผิด">ขนาดผิด</option>
+<option value="พิมพ์ผิด">พิมพ์ผิด</option>
+<option value="ไดคัทผิด">ไดคัทผิด</option>
+<option value="จำนวนไม่ครบ">จำนวนไม่ครบ</option>
+<option value="คุณภาพกระดาษ">คุณภาพกระดาษ</option>
+<option value="อื่น ๆ">อื่น ๆ</option>
+</select>
+</div>
+
+<div class="full-width">
+<label>รายละเอียดปัญหา *</label>
+<textarea id="description"
+                placeholder="อธิบายรายละเอียดปัญหาที่พบ"
+                required></textarea>
+</div>
+
+<div class="full-width">
+<label>ผู้รับผิดชอบ</label>
+<input type="text" id="assignee"
+                placeholder="ชื่อผู้รับผิดชอบหรือแผนก">
+</div>
+
+</div>
+
+<button type="submit" class="primary-btn">
++ บันทึกปัญหา
+</button>
+
+</form>
+</div>
+
+<div class="card">
+<h3>รายการปัญหาทั้งหมด</h3>
+
+<input
+          type="search"
+          id="searchInput"
+          placeholder="ค้นหาลูกค้า, PO หรือประเภทปัญหา..."
+        >
+
+<div class="table-wrapper">
+<table>
+<thead>
+<tr>
+<th>วันที่</th>
+<th>ลูกค้า</th>
+<th>PO</th>
+<th>ประเภทปัญหา</th>
+<th>ผู้รับผิดชอบ</th>
+<th>สถานะ</th>
+<th>จัดการ</th>
+</tr>
+</thead>
+<tbody id="complaintTable"></tbody>
+</table>
+</div>
+</div>
+
+</section>
+
+<!-- หน้า Dashboard -->
+<section id="dashboardPage" hidden>
+
+<h2>Quality Data Dashboard</h2>
+<p class="subtitle">ภาพรวมข้อมูลปัญหาคุณภาพจากรายการแจ้งปัญหา</p>
+
+<div class="stats-grid">
+<div class="stat-card">
+<p>ปัญหาทั้งหมด</p>
+<h2 id="totalCount">0</h2>
+</div>
+
+<div class="stat-card">
+<p>รอดำเนินการ</p>
+<h2 id="pendingCount">0</h2>
+</div>
+
+<div class="stat-card">
+<p>กำลังดำเนินการ</p>
+<h2 id="workingCount">0</h2>
+</div>
+
+<div class="stat-card">
+<p>แก้ไขเรียบร้อย</p>
+<h2 id="completedCount">0</h2>
+</div>
+</div>
+
+<div class="dashboard-grid">
+
+<div class="card">
+<h3>Top 10 ปัญหาที่พบบ่อย</h3>
+<div id="topProblems"></div>
+</div>
+
+<div class="card">
+<h3>จำนวนปัญหารายเดือน</h3>
+<div id="monthlyProblems"></div>
+</div>
+
+<div class="card">
+<h3>ปัญหาแยกตามลูกค้า</h3>
+<div id="customerProblems"></div>
+</div>
+
+</div>
+
+</section>
+
+  </main>
+
+
+  <script src="app.js"></script>
+
+
+</body>
+</html>
+</CodeBlock>
