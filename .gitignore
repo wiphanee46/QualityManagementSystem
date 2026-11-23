@@ -18,3 +18,5 @@ Thumbs.db
 .vscode/
 
 *.db
+
+server/data/excel-import.json
