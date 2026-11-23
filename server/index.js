@@ -1,6 +1,12 @@
 const express = require("express");
 const path = require("path");
-const db = require("./database/db");
+const {
+  JOB_TYPES,
+  PROBLEM_TYPES,
+  CS_STATUSES,
+  RESOLUTION_STATUSES
+} = require("./constants");
+const store = require("./database/complaintStore");
 
 const app = express();
 const PORT = 3000;
@@ -8,131 +14,100 @@ const PORT = 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "client")));
 
-const ALLOWED_STATUSES = [
-  "รอดำเนินการ",
-  "กำลังดำเนินการ",
-  "รอตรวจสอบ",
-  "แก้ไขเรียบร้อย",
-  "ปิดงาน"
-];
+const clean = value =>
+  value === undefined || value === null ? "" : String(value).trim();
 
-// ดึงรายการปัญหาพร้อมชื่อลูกค้า (หน้าตาข้อมูลเหมือนเดิมทุกอย่าง)
-const SELECT_COMPLAINT = `
-  SELECT c.id, c.date, cu.name AS customer, c.po, c.type, c.description,
-         c.assignee, c.status, c.resolution,
-         c.created_at AS createdAt, c.updated_at AS updatedAt
-  FROM complaints c
-  JOIN customers cu ON cu.id = c.customer_id
-`;
-
-function getComplaint(id) {
-  return db.prepare(`${SELECT_COMPLAINT} WHERE c.id = ?`).get(id);
+// เก็บเฉพาะฟิลด์ที่รู้จัก และตัดช่องว่างหัวท้าย
+function cleanBody(body) {
+  const result = {};
+  for (const key of [...store.FIELD_KEYS, "customer"]) {
+    if (body[key] !== undefined) result[key] = clean(body[key]);
+  }
+  return result;
 }
 
-function addHistory(complaintId, field, oldValue, newValue, time) {
-  db.prepare(`
-    INSERT INTO complaint_history (complaint_id, field, old_value, new_value, changed_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(complaintId, field, oldValue, newValue, time);
+// ตรวจค่าที่ต้องอยู่ในรายการที่กำหนด คืนข้อความ error หรือ null ถ้าผ่าน
+function validate(data, requireAll) {
+  const lists = [
+    ["jobType", JOB_TYPES, "ประเภทงาน"],
+    ["problemType", PROBLEM_TYPES, "ประเภทปัญหา"],
+    ["csStatus", CS_STATUSES, "สถานะ CS"],
+    ["resolutionStatus", RESOLUTION_STATUSES, "สถานะการแก้ไขปัญหา"]
+  ];
+
+  for (const [key, list, label] of lists) {
+    if (data[key] && !list.includes(data[key])) return `${label}ไม่ถูกต้อง`;
+  }
+
+  if (requireAll) {
+    const required = {
+      date: "วันที่แจ้งปัญหา",
+      customer: "ชื่อลูกค้า",
+      jobType: "ประเภทงาน",
+      problemType: "ประเภทปัญหา",
+      description: "ลักษณะปัญหา"
+    };
+    const missing = Object.keys(required)
+      .filter(key => !data[key])
+      .map(key => required[key]);
+
+    if (missing.length > 0) return `กรุณากรอก: ${missing.join(", ")}`;
+  }
+
+  return null;
 }
 
-// API: ดึงรายการทั้งหมด
-app.get("/api/complaints", (req, res) => {
-  const rows = db
-    .prepare(`${SELECT_COMPLAINT} ORDER BY c.date DESC, c.id DESC`)
-    .all();
-  res.json(rows);
+// API: รายการตัวเลือกสำหรับ dropdown
+app.get("/api/options", (req, res) => {
+  res.json({
+    jobTypes: JOB_TYPES,
+    problemTypes: PROBLEM_TYPES,
+    csStatuses: CS_STATUSES,
+    resolutionStatuses: RESOLUTION_STATUSES
+  });
 });
 
-// API: เพิ่มรายการใหม่
-const createComplaint = db.transaction(data => {
-  const now = new Date().toISOString();
-
-  db.prepare("INSERT OR IGNORE INTO customers (name) VALUES (?)").run(data.customer);
-  const customer = db.prepare("SELECT id FROM customers WHERE name = ?").get(data.customer);
-
-  const result = db.prepare(`
-    INSERT INTO complaints
-      (date, customer_id, po, type, description, assignee, status, resolution, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'รอดำเนินการ', '', ?, ?)
-  `).run(
-    data.date, customer.id, data.po || "", data.type,
-    data.description, data.assignee || "", now, now
-  );
-
-  addHistory(result.lastInsertRowid, "สร้างรายการ", "", "รอดำเนินการ", now);
-  return result.lastInsertRowid;
+app.get("/api/complaints", (req, res) => {
+  res.json(store.listComplaints());
 });
 
 app.post("/api/complaints", (req, res) => {
-  const { date, customer, type, description } = req.body;
+  const data = cleanBody(req.body);
+  data.csStatus = data.csStatus || "เปิดปัญหา";
+  data.resolutionStatus = data.resolutionStatus || "รอดำเนินการ";
 
-  if (!date || !customer || !type || !description) {
-    return res.status(400).json({
-      message: "กรุณากรอกวันที่ ลูกค้า ประเภทปัญหา และรายละเอียด"
-    });
-  }
+  const error = validate(data, true);
+  if (error) return res.status(400).json({ message: error });
 
-  const id = createComplaint(req.body);
-  res.status(201).json(getComplaint(id));
-});
-
-// API: แก้ไขสถานะ / ผลการแก้ไข / ผู้รับผิดชอบ พร้อมบันทึกประวัติ
-const FIELD_LABELS = {
-  status: "สถานะ",
-  resolution: "ผลการแก้ไข",
-  assignee: "ผู้รับผิดชอบ"
-};
-
-const updateComplaint = db.transaction((id, changes) => {
-  const current = db.prepare("SELECT * FROM complaints WHERE id = ?").get(id);
-  const now = new Date().toISOString();
-
-  for (const key of Object.keys(FIELD_LABELS)) {
-    if (changes[key] !== undefined && changes[key] !== current[key]) {
-      db.prepare(`UPDATE complaints SET ${key} = ?, updated_at = ? WHERE id = ?`)
-        .run(changes[key], now, id);
-      addHistory(id, FIELD_LABELS[key], current[key], changes[key], now);
-    }
-  }
+  const id = store.insertComplaint(data, "สร้างรายการ");
+  res.status(201).json(store.getComplaint(id));
 });
 
 app.patch("/api/complaints/:id", (req, res) => {
   const id = Number(req.params.id);
 
-  if (!getComplaint(id)) {
+  if (!store.getComplaint(id)) {
     return res.status(404).json({ message: "ไม่พบรายการปัญหา" });
   }
 
-  if (req.body.status && !ALLOWED_STATUSES.includes(req.body.status)) {
-    return res.status(400).json({ message: "สถานะไม่ถูกต้อง" });
-  }
+  const changes = cleanBody(req.body);
+  delete changes.customer; // ยังไม่รองรับการเปลี่ยนชื่อลูกค้า
 
-  updateComplaint(id, req.body);
-  res.json(getComplaint(id));
+  const error = validate(changes, false);
+  if (error) return res.status(400).json({ message: error });
+
+  store.updateComplaint(id, changes);
+  res.json(store.getComplaint(id));
 });
 
-// API: ดูประวัติการดำเนินงานของรายการหนึ่ง
 app.get("/api/complaints/:id/history", (req, res) => {
-  const rows = db.prepare(`
-    SELECT field, old_value AS oldValue, new_value AS newValue, changed_at AS changedAt
-    FROM complaint_history
-    WHERE complaint_id = ?
-    ORDER BY id DESC
-  `).all(Number(req.params.id));
-  res.json(rows);
+  res.json(store.getHistory(Number(req.params.id)));
 });
 
-// API: ลบรายการ (ประวัติของรายการนั้นถูกลบตามอัตโนมัติ)
 app.delete("/api/complaints/:id", (req, res) => {
-  const result = db
-    .prepare("DELETE FROM complaints WHERE id = ?")
-    .run(Number(req.params.id));
-
-  if (result.changes === 0) {
+  if (store.deleteComplaint(Number(req.params.id)) === 0) {
     return res.status(404).json({ message: "ไม่พบรายการปัญหา" });
   }
-
   res.json({ message: "ลบรายการสำเร็จ" });
 });
 

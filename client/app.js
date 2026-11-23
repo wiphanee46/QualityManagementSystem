@@ -1,12 +1,61 @@
-const STATUSES = [
-  "รอดำเนินการ",
-  "กำลังดำเนินการ",
-  "รอตรวจสอบ",
-  "แก้ไขเรียบร้อย",
-  "ปิดงาน"
+// ---------- นิยามฟิลด์ (ฟอร์มและหน้าต่างแก้ไขสร้างจากรายการนี้) ----------
+const GROUPS = [
+  { id: "general", title: "ข้อมูลทั่วไป" },
+  { id: "product", title: "ข้อมูลสินค้า" },
+  { id: "problem", title: "ปัญหาที่พบ" },
+  { id: "resolution", title: "การดำเนินการและแก้ไข" }
 ];
 
+const FIELD_DEFS = [
+  // ข้อมูลทั่วไป
+  { key: "date", label: "วันที่แจ้งปัญหา", type: "date", required: true, group: "general" },
+  { key: "customer", label: "ชื่อลูกค้า", suggest: true, required: true, createOnly: true, group: "general" },
+  { key: "jobType", label: "ประเภทงาน", type: "select", required: true, group: "general" },
+  { key: "po", label: "เลขที่ PO", group: "general" },
+  { key: "jobName", label: "ชื่องาน", group: "general" },
+  { key: "ssSb", label: "เลข SS/SB", group: "general" },
+
+  // ข้อมูลสินค้า
+  { key: "grade", label: "เกรดแกรม", group: "product" },
+  { key: "flute", label: "ลอน", group: "product" },
+  { key: "size", label: "ขนาด", group: "product" },
+  { key: "slit", label: "ผ่าทับรอย", group: "product" },
+  { key: "orderQty", label: "จำนวนสั่ง (แผ่น/ใบ)", group: "product" },
+  { key: "affectedQty", label: "จำนวนที่ได้รับผลกระทบ", group: "product" },
+  { key: "productionDate", label: "วันที่ผลิต", type: "date", group: "product" },
+  { key: "deliveryDate", label: "วันที่จัดส่ง", type: "date", group: "product" },
+
+  // ปัญหาที่พบ
+  { key: "problemType", label: "ประเภทปัญหา", type: "select", required: true, group: "problem" },
+  { key: "problemDetailType", label: "ลักษณะปัญหา", suggest: true, required: true, group: "problem" },
+  { key: "assignee", label: "ผู้รับผิดชอบ", suggest: true, group: "problem" },
+  { key: "description", label: "รายละเอียดปัญหา", type: "textarea", wide: true, group: "problem" },
+
+  // การดำเนินการและแก้ไข
+  { key: "action", label: "การดำเนินการ", type: "textarea", wide: true, group: "resolution" },
+  { key: "csStatus", label: "สถานะ CS", type: "select", editOnly: true, group: "resolution" },
+  { key: "resolutionStatus", label: "สถานะการแก้ไขปัญหา", type: "select", editOnly: true, group: "resolution" },
+  { key: "resolvedDate", label: "วันที่แก้ไขเสร็จสิ้น", type: "date", editOnly: true, group: "resolution" },
+  { key: "cause", label: "สาเหตุของปัญหา", type: "textarea", wide: true, editOnly: true, group: "resolution" },
+  { key: "solution", label: "วิธีแก้ปัญหา", type: "textarea", wide: true, editOnly: true, group: "resolution" },
+  { key: "prevention", label: "การป้องกัน", type: "textarea", wide: true, editOnly: true, group: "resolution" }
+];
+
+const CREATE_DEFS = FIELD_DEFS.filter(d => !d.editOnly);
+const EDIT_DEFS = FIELD_DEFS.filter(d => !d.createOnly);
+
+const CS_BADGE = {
+  "เปิดปัญหา": "badge-red",
+  "กำลังดำเนินการ": "badge-amber",
+  "รอติดตาม": "badge-amber",
+  "ปิดปัญหา": "badge-green",
+  "ยกเลิก": "badge-gray"
+};
+
 let complaints = [];
+let OPTIONS = {};
+let currentId = null;
+
 const $ = id => document.getElementById(id);
 
 // กันข้อความที่ผู้ใช้พิมพ์ไปแทรกเป็นโค้ด HTML
@@ -18,29 +67,159 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ---------- สร้างฟอร์มจากนิยามฟิลด์ ----------
+function fieldHtml(def, prefix, value) {
+  const id = `${prefix}-${def.key}`;
+  const required = def.required ? "required" : "";
+  const wide = def.wide ? "full-width" : "";
+  let input;
+
+  if (def.type === "select") {
+    const options = (OPTIONS[def.key] || [])
+      .map(o => `<option value="${escapeHtml(o)}" ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`)
+      .join("");
+    input = `<select id="${id}" ${required}><option value="">เลือก</option>${options}</select>`;
+  } else if (def.type === "textarea") {
+    input = `<textarea id="${id}" ${required}>${escapeHtml(value)}</textarea>`;
+  } else if (def.type === "date") {
+    input = `<input type="date" id="${id}" value="${escapeHtml(value)}" ${required}>`;
+  } else {
+    const list = def.suggest ? `list="list-${def.key}"` : "";
+    input = `<input type="text" id="${id}" value="${escapeHtml(value)}" ${list} ${required}>`;
+  }
+
+  return `
+    <div class="${wide}">
+      <label>${def.label}${def.required ? " *" : ""}</label>
+      ${input}
+    </div>`;
+}
+
+function renderFields(containerId, prefix, defs, values) {
+  $(containerId).innerHTML = GROUPS
+    .map(group => {
+      const items = defs.filter(d => d.group === group.id);
+      if (items.length === 0) return "";
+
+      return `
+        <fieldset>
+          <legend>${group.title}</legend>
+          <div class="form-grid">
+            ${items.map(d => fieldHtml(d, prefix, values[d.key] ?? "")).join("")}
+          </div>
+        </fieldset>`;
+    })
+    .join("");
+}
+
+function readFields(prefix, defs) {
+  const data = {};
+  defs.forEach(d => {
+    data[d.key] = $(`${prefix}-${d.key}`).value.trim();
+  });
+  return data;
+}
+
+function renderCreateForm() {
+  renderFields("newFields", "new", CREATE_DEFS, { date: today() });
+}
+
+// รายการแนะนำ (ลูกค้า / ลักษณะปัญหา / ผู้รับผิดชอบ) จากข้อมูลเดิม
+function renderDatalists() {
+  $("datalists").innerHTML = FIELD_DEFS
+    .filter(d => d.suggest)
+    .map(d => {
+      const values = [...new Set(complaints.map(c => c[d.key]).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "th"));
+
+      return `<datalist id="list-${d.key}">
+        ${values.map(v => `<option value="${escapeHtml(v)}"></option>`).join("")}
+      </datalist>`;
+    })
+    .join("");
+}
+
 // ---------- โหลดข้อมูล ----------
+async function loadOptions() {
+  const res = await fetch("/api/options");
+  const o = await res.json();
+
+  OPTIONS = {
+    jobType: o.jobTypes,
+    problemType: o.problemTypes,
+    csStatus: o.csStatuses,
+    resolutionStatus: o.resolutionStatuses
+  };
+}
+
 async function loadComplaints() {
   const res = await fetch("/api/complaints");
   complaints = await res.json();
+
+  renderDatalists();
   renderTable();
   renderDashboard();
 }
 
-// ---------- ตารางรายการ ----------
-function renderTable() {
+// ---------- ตัวกรอง ----------
+function fillFilter(id, allLabel, options, extra) {
+  $(id).innerHTML =
+    `<option value="">${allLabel}</option>` +
+    options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("") +
+    (extra || "");
+}
+
+function fillFilters() {
+  fillFilter("filterJobType", "ทุกประเภทงาน", OPTIONS.jobType);
+  fillFilter("filterProblemType", "ทุกประเภทปัญหา", OPTIONS.problemType);
+  fillFilter("filterCsStatus", "ทุกสถานะ CS", OPTIONS.csStatus);
+  fillFilter(
+    "filterResolution",
+    "ทุกสถานะแก้ไข",
+    OPTIONS.resolutionStatus,
+    `<option value="__blank__">ยังไม่ระบุ</option>`
+  );
+}
+
+function filteredComplaints() {
   const keyword = $("searchInput").value.trim().toLowerCase();
 
-  const rows = complaints
-    .filter(c =>
-      [c.customer, c.po, c.type].some(v =>
+  const filters = {
+    jobType: $("filterJobType").value,
+    problemType: $("filterProblemType").value,
+    csStatus: $("filterCsStatus").value,
+    resolutionStatus: $("filterResolution").value
+  };
+
+  return complaints.filter(c => {
+    const matchFilters = Object.entries(filters).every(([key, value]) => {
+      if (!value) return true;
+      if (value === "__blank__") return !c[key];
+      return c[key] === value;
+    });
+
+    const matchKeyword =
+      !keyword ||
+      [c.customer, c.po, c.ssSb, c.jobName, c.problemDetailType, c.description].some(v =>
         (v || "").toLowerCase().includes(keyword)
-      )
-    )
-    .sort((a, b) => b.date.localeCompare(a.date));
+      );
+
+    return matchFilters && matchKeyword;
+  });
+}
+
+// ---------- ตารางรายการ ----------
+function renderTable() {
+  const rows = filteredComplaints();
+  $("resultCount").textContent = `(${rows.length} จาก ${complaints.length} รายการ)`;
 
   if (rows.length === 0) {
     $("complaintTable").innerHTML =
-      `<tr><td colspan="7" class="empty">ไม่พบรายการ</td></tr>`;
+      `<tr><td colspan="9" class="empty">ไม่พบรายการ</td></tr>`;
     return;
   }
 
@@ -49,22 +228,20 @@ function renderTable() {
       <tr>
         <td>${escapeHtml(c.date)}</td>
         <td>${escapeHtml(c.customer)}</td>
+        <td>${escapeHtml(c.jobType)}</td>
         <td>${escapeHtml(c.po)}</td>
         <td>
-          ${escapeHtml(c.type)}
-          <div class="desc">${escapeHtml(c.description)}</div>
+          ${escapeHtml(c.problemDetailType)}
+          <div class="desc">${escapeHtml(c.problemType)}</div>
         </td>
         <td>${escapeHtml(c.assignee)}</td>
         <td>
-          <select data-action="status" data-id="${c.id}">
-            ${STATUSES.map(s =>
-              `<option value="${s}" ${s === c.status ? "selected" : ""}>${s}</option>`
-            ).join("")}
-          </select>
+          <span class="badge ${CS_BADGE[c.csStatus] || "badge-gray"}">${escapeHtml(c.csStatus)}</span>
         </td>
-        <td>
-          <button class="delete-btn" data-action="detail" data-id="${c.id}">รายละเอียด</button>
-          <button class="delete-btn" data-action="delete" data-id="${c.id}"=>ลบ</button>
+        <td>${escapeHtml(c.resolutionStatus) || "-"}</td>
+        <td class="actions">
+          <button class="detail-btn" data-action="detail" data-id="${c.id}">รายละเอียด</button>
+          <button class="delete-btn" data-action="delete" data-id="${c.id}">ลบ</button>
         </td>
       </tr>
     `)
@@ -72,83 +249,273 @@ function renderTable() {
 }
 
 // ---------- Dashboard ----------
-function countBy(list, keyFn) {
-  const result = {};
-  list.forEach(item => {
-    const key = keyFn(item);
-    if (key) result[key] = (result[key] || 0) + 1;
-  });
-  return Object.entries(result);
+const MONTHS_TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+const PROBLEM_COLORS = ["#2563eb", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#06b6d4", "#6b7280"];
+
+const dashState = { jobType: "", year: "", month: "" };
+
+const countWhere = (list, test) => list.filter(test).length;
+const monthOf = c => Number(c.date.slice(5, 7));
+
+function fillDashboardFilters() {
+  // แท็บประเภทงาน
+  $("dashJobTabs").innerHTML = ["", ...OPTIONS.jobType]
+    .map(job => `
+      <button type="button" class="job-tab ${job === dashState.jobType ? "active" : ""}"
+              data-job="${escapeHtml(job)}">${job || "ทั้งหมด"}</button>
+    `)
+    .join("");
+
+  // ปี (จากข้อมูลจริง ล่าสุดอยู่บนสุด)
+  const years = [...new Set(complaints.map(c => c.date.slice(0, 4)))].sort().reverse();
+  if (!years.includes(dashState.year)) dashState.year = years[0] || "";
+
+  $("dashYear").innerHTML = years
+    .map(y => `<option value="${y}" ${y === dashState.year ? "selected" : ""}>${y}</option>`)
+    .join("");
+
+  // เดือน
+  $("dashMonth").innerHTML =
+    `<option value="">ทั้งหมด</option>` +
+    MONTHS_TH.map((name, i) => {
+      const value = String(i + 1).padStart(2, "0");
+      return `<option value="${value}" ${value === dashState.month ? "selected" : ""}>${name}</option>`;
+    }).join("");
 }
 
-function renderBars(containerId, entries) {
-  const container = $(containerId);
+// ตารางสรุป: ชื่อ | จำนวน | แท่งสัดส่วน | แถวรวม
+function renderSummaryTable(containerId, rows, total) {
+  const max = Math.max(1, ...rows.map(r => r[1]));
 
-  if (entries.length === 0) {
-    container.innerHTML = `<p class="empty">ยังไม่มีข้อมูล</p>`;
+  $(containerId).innerHTML = `
+    <table class="summary-table">
+      <tbody>
+        ${rows.map(([label, count]) => `
+          <tr>
+            <td>${escapeHtml(label)}</td>
+            <td class="num">${count}</td>
+            <td class="bar-cell">
+              <div class="bar-track"><div class="bar-fill" style="width:${(count / max) * 100}%"></div></div>
+            </td>
+          </tr>
+        `).join("")}
+        <tr class="total-row"><td>รวม</td><td class="num">${total}</td><td></td></tr>
+      </tbody>
+    </table>`;
+}
+
+// แนวโน้มรายเดือน แยกสีตามประเภทปัญหา
+function renderMonthlyTrend(base) {
+  $("legend").innerHTML = OPTIONS.problemType
+    .map((type, i) => `<span class="legend-item"><i style="background:${PROBLEM_COLORS[i]}"></i>${escapeHtml(type)}</span>`)
+    .join("");
+
+  if (base.length === 0) {
+    $("monthlyTrend").innerHTML = `<p class="empty">ยังไม่มีข้อมูล</p>`;
     return;
   }
 
-  const max = Math.max(...entries.map(e => e[1]));
+  const months = base.map(monthOf);
+  const first = Math.min(...months);
+  const last = Math.max(...months);
 
-  container.innerHTML = entries
-    .map(([label, count]) => `
-      <div class="bar-row">
-        <div class="bar-label">
-          <span>${escapeHtml(label)}</span>
-          <strong>${count}</strong>
-        </div>
-        <div class="bar-track">
-          <div class="bar-fill" style="width:${(count / max) * 100}%"></div>
-        </div>
-      </div>
-    `)
+  const rows = [];
+  for (let m = first; m <= last; m++) {
+    rows.push({ label: MONTHS_TH[m - 1], items: base.filter(c => monthOf(c) === m) });
+  }
+
+  const max = Math.max(1, ...rows.map(r => r.items.length));
+
+  $("monthlyTrend").innerHTML = rows
+    .map(r => {
+      const segments = OPTIONS.problemType
+        .map((type, i) => {
+          const n = countWhere(r.items, c => c.problemType === type);
+          if (n === 0) return "";
+          return `<div class="seg" style="width:${(n / max) * 100}%;background:${PROBLEM_COLORS[i]}"
+                       title="${escapeHtml(type)}: ${n}">${n}</div>`;
+        })
+        .join("");
+
+      return `
+        <div class="stack-row">
+          <span class="stack-label">${r.label}</span>
+          <div class="stack-bar">${segments}</div>
+          <strong class="stack-total">${r.items.length}</strong>
+        </div>`;
+    })
     .join("");
 }
 
-function renderDashboard() {
-  $("totalCount").textContent = complaints.length;
-  $("pendingCount").textContent =
-    complaints.filter(c => c.status === "รอดำเนินการ").length;
-  $("workingCount").textContent =
-    complaints.filter(c => c.status === "กำลังดำเนินการ").length;
-  // นับ "ปิดงาน" รวมเป็นแก้ไขเรียบร้อยด้วย
-  $("completedCount").textContent =
-    complaints.filter(c => ["แก้ไขเรียบร้อย", "ปิดงาน"].includes(c.status)).length;
+// ตารางลูกค้า x ประเภทปัญหา
+function renderCustomerMatrix(list) {
+  if (list.length === 0) {
+    $("customerMatrix").innerHTML = `<p class="empty">ยังไม่มีข้อมูล</p>`;
+    return;
+  }
 
-  const byType = countBy(complaints, c => c.type)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
+  const rows = [...new Set(list.map(c => c.customer))]
+    .map(name => {
+      const items = list.filter(c => c.customer === name);
+      return {
+        name,
+        counts: OPTIONS.problemType.map(type => countWhere(items, c => c.problemType === type)),
+        total: items.length
+      };
+    })
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "th"));
 
-  const byMonth = countBy(complaints, c => c.date.slice(0, 7))
-    .sort((a, b) => a[0].localeCompare(b[0]));
+  const columnTotals = OPTIONS.problemType.map((type, i) =>
+    rows.reduce((sum, r) => sum + r.counts[i], 0)
+  );
 
-  const byCustomer = countBy(complaints, c => c.customer)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
-  renderBars("topProblems", byType);
-  renderBars("monthlyProblems", byMonth);
-  renderBars("customerProblems", byCustomer);
+  $("customerMatrix").innerHTML = `
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>ชื่อลูกค้า</th>
+          ${OPTIONS.problemType.map(t => `<th class="num">${escapeHtml(t)}</th>`).join("")}
+          <th class="num">รวม</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${escapeHtml(r.name)}</td>
+            ${r.counts.map(n => `<td class="num ${n ? "hot" : "zero"}">${n || "-"}</td>`).join("")}
+            <td class="num"><strong>${r.total}</strong></td>
+          </tr>
+        `).join("")}
+        <tr class="total-row">
+          <td>รวม</td>
+          ${columnTotals.map(n => `<td class="num">${n}</td>`).join("")}
+          <td class="num">${list.length}</td>
+        </tr>
+      </tbody>
+    </table>`;
 }
+
+// TOP 10 ลักษณะปัญหา พร้อมรายชื่อลูกค้า
+function renderTopProblems(list) {
+  const groups = new Map();
+
+  list.forEach(c => {
+    if (!c.problemDetailType) return;
+    if (!groups.has(c.problemDetailType)) groups.set(c.problemDetailType, new Map());
+
+    const customers = groups.get(c.problemDetailType);
+    customers.set(c.customer, (customers.get(c.customer) || 0) + 1);
+  });
+
+  const top = [...groups.entries()]
+    .map(([name, customers]) => ({
+      name,
+      customers,
+      count: [...customers.values()].reduce((a, b) => a + b, 0)
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "th"))
+    .slice(0, 10);
+
+  const totalCount = top.reduce((sum, t) => sum + t.count, 0);
+  const customerSet = new Set(top.flatMap(t => [...t.customers.keys()]));
+
+  $("topKpis").innerHTML = `
+    <div><strong>${totalCount}</strong><span>ครั้ง</span></div>
+    <div><strong>${top.length}</strong><span>ปัญหาย่อย</span></div>
+    <div><strong>${customerSet.size}</strong><span>ลูกค้า</span></div>`;
+
+  if (top.length === 0) {
+    $("topTable").innerHTML = `<p class="empty">ยังไม่มีข้อมูล</p>`;
+    return;
+  }
+
+  $("topTable").innerHTML = `
+    <table>
+      <thead>
+        <tr><th>#</th><th>ปัญหาย่อย</th><th class="num">จำนวนครั้ง</th><th>ชื่อลูกค้า</th></tr>
+      </thead>
+      <tbody>
+        ${top.map((t, i) => {
+          const names = [...t.customers.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "th"))
+            .map(([name, n]) => `${escapeHtml(name)} (${n})`)
+            .join(", ");
+
+          return `
+            <tr>
+              <td class="rank">${i + 1}</td>
+              <td>${escapeHtml(t.name)}</td>
+              <td class="num"><strong>${t.count}</strong></td>
+              <td>${names}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
+
+function renderDashboard() {
+  fillDashboardFilters();
+
+  // ข้อมูลตามประเภทงาน + ปี (ใช้กับแนวโน้มรายเดือน)
+  const base = complaints.filter(
+    c =>
+      (!dashState.jobType || c.jobType === dashState.jobType) &&
+      c.date.startsWith(dashState.year)
+  );
+
+  // เพิ่มตัวกรองเดือน (ใช้กับส่วนอื่นทั้งหมด)
+  const list = dashState.month
+    ? base.filter(c => c.date.slice(5, 7) === dashState.month)
+    : base;
+
+  $("kpiTotal").textContent = list.length;
+  $("kpiDetail").textContent = new Set(list.map(c => c.problemDetailType).filter(Boolean)).size;
+  $("kpiCustomer").textContent = new Set(list.map(c => c.customer)).size;
+
+  // สถานะ CS
+  const csRows = OPTIONS.csStatus.map(s => [s, countWhere(list, c => c.csStatus === s)]);
+  renderSummaryTable("csTable", csRows, list.length);
+
+  // สถานะการแก้ไขปัญหา (รวมแถว "ไม่ระบุ" เพื่อให้ยอดรวมเท่ากับจำนวนปัญหาทั้งหมด)
+  const resolutionRows = [
+    ...OPTIONS.resolutionStatus.map(s => [s, countWhere(list, c => c.resolutionStatus === s)]),
+    ["ไม่ระบุ", countWhere(list, c => !c.resolutionStatus)]
+  ];
+  renderSummaryTable("resolutionTable", resolutionRows, list.length);
+
+  // ประเภทปัญหา
+  const typeRows = OPTIONS.problemType.map(t => [t, countWhere(list, c => c.problemType === t)]);
+  renderSummaryTable("problemTypeTable", typeRows, list.length);
+
+  renderMonthlyTrend(base);
+  renderCustomerMatrix(list);
+  renderTopProblems(list);
+}
+
+$("dashJobTabs").addEventListener("click", e => {
+  if (e.target.dataset.job === undefined) return;
+  dashState.jobType = e.target.dataset.job;
+  renderDashboard();
+});
+
+$("dashYear").addEventListener("change", e => {
+  dashState.year = e.target.value;
+  renderDashboard();
+});
+
+$("dashMonth").addEventListener("change", e => {
+  dashState.month = e.target.value;
+  renderDashboard();
+});
 
 // ---------- ฟอร์มเพิ่มปัญหา ----------
 $("complaintForm").addEventListener("submit", async e => {
   e.preventDefault();
 
-  const body = {
-    date: $("date").value,
-    customer: $("customer").value.trim(),
-    po: $("po").value.trim(),
-    type: $("type").value,
-    description: $("description").value.trim(),
-    assignee: $("assignee").value.trim()
-  };
-
   const res = await fetch("/api/complaints", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(readFields("new", CREATE_DEFS))
   });
 
   if (!res.ok) {
@@ -157,23 +524,11 @@ $("complaintForm").addEventListener("submit", async e => {
     return;
   }
 
-  $("complaintForm").reset();
-  setToday();
-  loadComplaints();
+  renderCreateForm();
+  await loadComplaints();
 });
 
-// ---------- เปลี่ยนสถานะ / ลบ ----------
-$("complaintTable").addEventListener("change", async e => {
-  if (e.target.dataset.action !== "status") return;
-
-  await fetch(`/api/complaints/${e.target.dataset.id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status: e.target.value })
-  });
-  loadComplaints();
-});
-
+// ---------- ปุ่มในตาราง: รายละเอียด / ลบ ----------
 $("complaintTable").addEventListener("click", async e => {
   const { action, id } = e.target.dataset;
 
@@ -189,26 +544,19 @@ $("complaintTable").addEventListener("click", async e => {
   loadComplaints();
 });
 
-// ---------- หน้าต่างรายละเอียด + ประวัติ ----------
-let currentId = null;
+["searchInput", "filterJobType", "filterProblemType", "filterCsStatus", "filterResolution"]
+  .forEach(id => {
+    $(id).addEventListener(id === "searchInput" ? "input" : "change", renderTable);
+  });
 
+// ---------- หน้าต่างรายละเอียด + ประวัติ ----------
 function openDetail(id) {
   const c = complaints.find(item => String(item.id) === String(id));
   if (!c) return;
 
   currentId = c.id;
-
   $("detailTitle").textContent = `${c.customer} • ${c.po || "ไม่มี PO"}`;
-  $("detailInfo").innerHTML = `
-    <p><strong>วันที่แจ้ง:</strong> ${escapeHtml(c.date)}</p>
-    <p><strong>ประเภทปัญหา:</strong> ${escapeHtml(c.type)}</p>
-    <p><strong>รายละเอียด:</strong> ${escapeHtml(c.description)}</p>
-  `;
-  $("detailStatus").innerHTML = STATUSES
-    .map(s => `<option value="${s}" ${s === c.status ? "selected" : ""}>${s}</option>`)
-    .join("");
-  $("detailAssignee").value = c.assignee;
-  $("detailResolution").value = c.resolution;
+  renderFields("editFields", "edit", EDIT_DEFS, c);
 
   $("detailDialog").showModal();
   loadHistory(c.id);
@@ -240,23 +588,23 @@ async function loadHistory(id) {
 $("detailForm").addEventListener("submit", async e => {
   e.preventDefault();
 
-  await fetch(`/api/complaints/${currentId}`, {
+  const res = await fetch(`/api/complaints/${currentId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      status: $("detailStatus").value,
-      assignee: $("detailAssignee").value.trim(),
-      resolution: $("detailResolution").value.trim()
-    })
+    body: JSON.stringify(readFields("edit", EDIT_DEFS))
   });
+
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.message);
+    return;
+  }
 
   await loadComplaints();
   loadHistory(currentId);
 });
 
 $("closeDialog").addEventListener("click", () => $("detailDialog").close());
-
-$("searchInput").addEventListener("input", renderTable);
 
 // ---------- สลับหน้า ----------
 function showPage(page) {
@@ -271,10 +619,12 @@ function showPage(page) {
 $("complaintTab").addEventListener("click", () => showPage("complaint"));
 $("dashboardTab").addEventListener("click", () => showPage("dashboard"));
 
-// ตั้งวันที่เริ่มต้นเป็นวันนี้
-function setToday() {
-  $("date").value = new Date().toISOString().slice(0, 10);
+// ---------- เริ่มทำงาน ----------
+async function init() {
+  await loadOptions();
+  fillFilters();
+  renderCreateForm();
+  await loadComplaints();
 }
 
-setToday();
-loadComplaints();
+init();
