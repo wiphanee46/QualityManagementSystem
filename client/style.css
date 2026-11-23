@@ -116,3 +116,36 @@ th { background: #f9fafb; }
 .bar-track { background: #e5e7eb; border-radius: 6px; height: 12px; }
 .bar-fill { background: #2563eb; height: 100%; border-radius: 6px; }
 .empty { color: #9ca3af; }
+dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(640px, 92vw);
+  max-height: 90vh;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+
+.dialog-header { display: flex; justify-content: space-between; align-items: center; }
+.dialog-header h3 { margin: 0; }
+.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; }
+
+.detail-info { background: #f9fafb; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+.detail-info p { margin: 4px 0; font-size: 14px; }
+
+#detailForm label { margin-top: 12px; }
+#detailForm button { margin-top: 16px; }
+
+.history-list { list-style: none; padding: 0; margin: 0; }
+.history-list li { padding: 8px 0 8px 14px; border-left: 3px solid #2563eb; margin-bottom: 8px; font-size: 14px; }
+
+.detail-btn {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.detail-btn:hover { background: #bfdbfe; }

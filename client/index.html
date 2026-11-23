@@ -178,6 +178,30 @@ Quality Dashboard
 
   </main>
 
+<dialog id="detailDialog">
+  <div class="dialog-header">
+    <h3 id="detailTitle">รายละเอียดปัญหา</h3>
+    <button type="button" class="close-btn" id="closeDialog">✕</button>
+  </div>
+
+  <div id="detailInfo" class="detail-info"></div>
+
+  <form id="detailForm">
+    <label>สถานะ</label>
+    <select id="detailStatus"></select>
+
+    <label>ผู้รับผิดชอบ</label>
+    <input type="text" id="detailAssignee">
+
+    <label>ผลการแก้ไข</label>
+    <textarea id="detailResolution" placeholder="บันทึกวิธีแก้ไข / สาเหตุ"></textarea>
+
+    <button type="submit" class="primary-btn">บันทึกการแก้ไข</button>
+  </form>
+
+  <h4>ประวัติการดำเนินงาน</h4>
+  <ul id="historyList" class="history-list"></ul>
+</dialog>
 
   <script src="app.js"></script>
 

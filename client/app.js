@@ -63,7 +63,8 @@ function renderTable() {
           </select>
         </td>
         <td>
-          <button class="delete-btn" data-action="delete" data-id="${c.id}">ลบ</button>
+          <button class="delete-btn" data-action="detail" data-id="${c.id}">รายละเอียด</button>
+          <button class="delete-btn" data-action="delete" data-id="${c.id}"=>ลบ</button>
         </td>
       </tr>
     `)
@@ -174,12 +175,86 @@ $("complaintTable").addEventListener("change", async e => {
 });
 
 $("complaintTable").addEventListener("click", async e => {
-  if (e.target.dataset.action !== "delete") return;
+  const { action, id } = e.target.dataset;
+
+  if (action === "detail") {
+    openDetail(id);
+    return;
+  }
+
+  if (action !== "delete") return;
   if (!confirm("ต้องการลบรายการนี้ใช่หรือไม่?")) return;
 
-  await fetch(`/api/complaints/${e.target.dataset.id}`, { method: "DELETE" });
+  await fetch(`/api/complaints/${id}`, { method: "DELETE" });
   loadComplaints();
 });
+
+// ---------- หน้าต่างรายละเอียด + ประวัติ ----------
+let currentId = null;
+
+function openDetail(id) {
+  const c = complaints.find(item => String(item.id) === String(id));
+  if (!c) return;
+
+  currentId = c.id;
+
+  $("detailTitle").textContent = `${c.customer} • ${c.po || "ไม่มี PO"}`;
+  $("detailInfo").innerHTML = `
+    <p><strong>วันที่แจ้ง:</strong> ${escapeHtml(c.date)}</p>
+    <p><strong>ประเภทปัญหา:</strong> ${escapeHtml(c.type)}</p>
+    <p><strong>รายละเอียด:</strong> ${escapeHtml(c.description)}</p>
+  `;
+  $("detailStatus").innerHTML = STATUSES
+    .map(s => `<option value="${s}" ${s === c.status ? "selected" : ""}>${s}</option>`)
+    .join("");
+  $("detailAssignee").value = c.assignee;
+  $("detailResolution").value = c.resolution;
+
+  $("detailDialog").showModal();
+  loadHistory(c.id);
+}
+
+async function loadHistory(id) {
+  const res = await fetch(`/api/complaints/${id}/history`);
+  const rows = await res.json();
+
+  $("historyList").innerHTML = rows
+    .map(h => {
+      const time = new Date(h.changedAt).toLocaleString("th-TH", {
+        dateStyle: "medium",
+        timeStyle: "short"
+      });
+      const change = h.oldValue
+        ? `${escapeHtml(h.oldValue)} → ${escapeHtml(h.newValue)}`
+        : escapeHtml(h.newValue);
+
+      return `
+        <li>
+          <strong>${escapeHtml(h.field)}</strong>: ${change}
+          <div class="desc">${time}</div>
+        </li>`;
+    })
+    .join("");
+}
+
+$("detailForm").addEventListener("submit", async e => {
+  e.preventDefault();
+
+  await fetch(`/api/complaints/${currentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      status: $("detailStatus").value,
+      assignee: $("detailAssignee").value.trim(),
+      resolution: $("detailResolution").value.trim()
+    })
+  });
+
+  await loadComplaints();
+  loadHistory(currentId);
+});
+
+$("closeDialog").addEventListener("click", () => $("detailDialog").close());
 
 $("searchInput").addEventListener("input", renderTable);
 
